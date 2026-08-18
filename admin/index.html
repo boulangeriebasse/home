@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>BASSE 画像管理</title>
+<style>
+:root{--ink:#1d1a17;--soft:#5c564f;--line:#e8e4de;--bg:#faf8f5;--accent:#b3803e;--ok:#3d7a4f;--err:#b04a3a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Hiragino Kaku Gothic ProN',sans-serif;background:var(--bg);color:var(--ink);line-height:1.7;padding:24px 16px 80px}
+.wrap{max-width:960px;margin:0 auto}
+h1{font-size:20px;letter-spacing:.1em;margin-bottom:4px}
+.sub{font-size:12.5px;color:var(--soft);margin-bottom:20px}
+.token-box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:28px}
+.token-box label{font-size:13px;font-weight:600;display:block;margin-bottom:6px}
+.token-row{display:flex;gap:8px}
+.token-row input{flex:1;padding:10px;border:1px solid var(--line);border-radius:6px;font-size:13px}
+button{padding:10px 18px;border:0;border-radius:6px;background:var(--accent);color:#fff;font-size:13px;cursor:pointer}
+button:hover{opacity:.85}
+.token-note{font-size:11.5px;color:var(--soft);margin-top:8px}
+.token-ok{font-size:12.5px;color:var(--ok);margin-top:8px;display:none}
+h2{font-size:15px;letter-spacing:.08em;margin:30px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.slot{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative;transition:box-shadow .2s,border-color .2s}
+.slot.dragover{border-color:var(--accent);box-shadow:0 0 0 3px rgba(179,128,62,.25)}
+.slot img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#eee}
+.slot .name{font-size:11.5px;padding:7px 9px;color:var(--soft);display:flex;justify-content:space-between;align-items:center}
+.slot .st{font-size:10.5px}
+.st.up{color:var(--accent)}.st.done{color:var(--ok)}.st.err{color:var(--err)}
+.slot .hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);color:#fff;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;aspect-ratio:1/1}
+.slot:hover .hint{opacity:1}
+.note{font-size:12px;color:var(--soft);margin-top:24px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.text-box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}
+.text-box .loading{font-size:12.5px;color:var(--soft)}
+.field{margin-bottom:14px}
+.field label{font-size:12px;font-weight:600;color:var(--soft);display:block;margin-bottom:4px}
+.field textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13.5px;font-family:inherit;line-height:1.6;resize:vertical;min-height:38px}
+.field textarea:focus{outline:none;border-color:var(--accent)}
+.text-actions{display:flex;align-items:center;gap:12px;margin-top:6px}
+.text-status{font-size:12.5px}
+.text-status.done{color:var(--ok)}.text-status.err{color:var(--err)}.text-status.up{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Boulangerie BASSE 画像管理</h1>
+  <p class="sub">写真をドラッグ&ドロップ（またはタップして選択）すると差し替わります。反映まで1〜2分かかります。</p>
+
+  <div class="token-box">
+    <label for="token">GitHubトークン</label>
+    <div class="token-row">
+      <input type="password" id="token" placeholder="github_pat_... を貼り付け">
+      <button id="save-token">保存</button>
+    </div>
+    <p class="token-ok" id="token-ok">✓ トークン保存済み（このブラウザにのみ保存されます）</p>
+    <p class="token-note">GitHub → Settings → Developer settings → Fine-grained tokens で、boulangeriebasse/home の Contents: Read and write 権限のトークンを作成してください。</p>
+  </div>
+
+  <h2>テキスト編集</h2>
+  <div class="text-box" id="text-box"><p class="loading">読み込み中…</p></div>
+
+  <div id="sections"></div>
+
+  <p class="note">※ 画像は自動で圧縮されます（トップ画像は1800px・その他は1200pxまで縮小、JPEG変換）。<br>※ 差し替え後、サイト（GitHub Pages）への反映には1〜2分かかります。反映されない時はブラウザを再読み込みしてください。</p>
+</div>
+
+<script>
+const OWNER='boulangeriebasse', REPO='home', BRANCH='main';
+const SECTIONS=[
+  ['トップ',[['hero','メイン写真',1800]]],
+  ['About（お店について）',[['about-1','写真1',1200],['about-2','写真2',1200]]],
+  ['ギャラリー帯',[1,2,3,4,5,6].map(i=>[`strip-${i}`,`写真${i}`,1200])],
+  ['シグネチャー（くるみこしあん）',[['signature','商品写真',1200]]],
+  ['メニュー',Array.from({length:16},(_,i)=>[`menu-${i+1}`,`パン${i+1}`,1200])],
+  ['アクセス',[['access','店舗写真',1200]]],
+];
+
+const $=s=>document.querySelector(s);
+const tokenInput=$('#token');
+tokenInput.value=localStorage.getItem('gh_token')||'';
+const showTokenOk=()=>{$('#token-ok').style.display=tokenInput.value?'block':'none'};
+showTokenOk();
+$('#save-token').onclick=()=>{localStorage.setItem('gh_token',tokenInput.value.trim());showTokenOk();alert('保存しました')};
+
+const root=$('#sections');
+for(const [title,slots] of SECTIONS){
+  const h=document.createElement('h2');h.textContent=title;root.appendChild(h);
+  const grid=document.createElement('div');grid.className='grid';root.appendChild(grid);
+  for(const [file,label,maxPx] of slots){
+    const d=document.createElement('div');d.className='slot';
+    d.innerHTML=`<img src="../images/${file}.jpg?t=${Date.now()}" alt="${label}">
+      <div class="hint">ここにドロップ / タップで選択</div>
+      <div class="name"><span>${label}</span><span class="st" data-st></span></div>`;
+    grid.appendChild(d);
+    const st=d.querySelector('[data-st]'), img=d.querySelector('img');
+    const handle=async f=>{
+      if(!f||!f.type.startsWith('image/')){st.textContent='画像を選んでください';st.className='st err';return}
+      try{
+        st.textContent='圧縮中…';st.className='st up';
+        const blob=await compress(f,maxPx);
+        st.textContent='アップロード中…';
+        await upload(`images/${file}.jpg`,blob);
+        img.src=URL.createObjectURL(blob);
+        st.textContent='✓ 保存しました';st.className='st done';
+      }catch(e){st.textContent=e.message;st.className='st err'}
+    };
+    d.addEventListener('dragover',e=>{e.preventDefault();d.classList.add('dragover')});
+    d.addEventListener('dragleave',()=>d.classList.remove('dragover'));
+    d.addEventListener('drop',e=>{e.preventDefault();d.classList.remove('dragover');handle(e.dataTransfer.files[0])});
+    d.addEventListener('click',()=>{
+      const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
+      inp.onchange=()=>handle(inp.files[0]);inp.click();
+    });
+  }
+}
+
+async function compress(file,maxPx){
+  const bmp=await createImageBitmap(file);
+  const scale=Math.min(1,maxPx/Math.max(bmp.width,bmp.height));
+  const w=Math.round(bmp.width*scale),h=Math.round(bmp.height*scale);
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  c.getContext('2d').drawImage(bmp,0,0,w,h);
+  return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',.85));
+}
+
+// --- テキスト編集 ---
+const textBox=$('#text-box');
+let siteDoc=null, siteSha=null, textFields=[];
+(async function loadTexts(){
+  try{
+    const api=`https://api.github.com/repos/${OWNER}/${REPO}/contents/index.html?ref=${BRANCH}`;
+    const token=(localStorage.getItem('gh_token')||'').trim();
+    const headers={Accept:'application/vnd.github+json'};
+    if(token)headers.Authorization=`Bearer ${token}`;
+    const res=await fetch(api,{headers});
+    if(!res.ok)throw new Error(`index.htmlの取得に失敗しました (${res.status})`);
+    const j=await res.json();
+    siteSha=j.sha;
+    const bytes=Uint8Array.from(atob(j.content.replace(/\n/g,'')),c=>c.charCodeAt(0));
+    const html=new TextDecoder().decode(bytes);
+    siteDoc=new DOMParser().parseFromString(html,'text/html');
+    textBox.innerHTML='';
+    siteDoc.querySelectorAll('[data-edit]').forEach(el=>{
+      const wrap=document.createElement('div');wrap.className='field';
+      const label=document.createElement('label');label.textContent=el.getAttribute('data-edit');
+      const ta=document.createElement('textarea');
+      ta.value=el.innerHTML.replace(/<br\s*\/?>/gi,'\n').trim();
+      ta.rows=Math.max(1,ta.value.split('\n').length);
+      wrap.append(label,ta);textBox.appendChild(wrap);
+      textFields.push({el,ta});
+    });
+    const actions=document.createElement('div');actions.className='text-actions';
+    const btn=document.createElement('button');btn.textContent='テキストを保存';
+    const status=document.createElement('span');status.className='text-status';
+    actions.append(btn,status);textBox.appendChild(actions);
+    btn.onclick=async()=>{
+      try{
+        status.textContent='保存中…';status.className='text-status up';btn.disabled=true;
+        textFields.forEach(({el,ta})=>{el.innerHTML=ta.value.trim().replace(/\n/g,'<br>')});
+        const out='<!DOCTYPE html>\n'+siteDoc.documentElement.outerHTML;
+        const b64=btoa(String.fromCharCode(...new TextEncoder().encode(out)));
+        await putFile('index.html',b64,siteSha,'テキスト更新');
+        const re=await fetch(api,{headers});
+        if(re.ok)siteSha=(await re.json()).sha;
+        status.textContent='✓ 保存しました（反映まで1〜2分）';status.className='text-status done';
+      }catch(e){status.textContent=e.message;status.className='text-status err'}
+      finally{btn.disabled=false}
+    };
+  }catch(e){textBox.innerHTML=`<p class="loading" style="color:var(--err)">${e.message}</p>`}
+})();
+
+async function putFile(path,b64,sha,msg){
+  const token=(localStorage.getItem('gh_token')||'').trim();
+  if(!token)throw new Error('先にトークンを保存してください');
+  const api=`https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
+  const put=await fetch(api,{method:'PUT',
+    headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'},
+    body:JSON.stringify({message:`${msg}: ${path}`,content:b64,branch:BRANCH,...(sha?{sha}:{})})});
+  if(put.status===401||put.status===403)throw new Error('トークンが無効です');
+  if(put.status===409)throw new Error('競合しました。ページを再読み込みしてやり直してください');
+  if(!put.ok)throw new Error(`保存失敗 (${put.status})`);
+}
+
+async function upload(path,blob){
+  const token=(localStorage.getItem('gh_token')||'').trim();
+  if(!token)throw new Error('先にトークンを保存してください');
+  const api=`https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
+  const headers={Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'};
+  const cur=await fetch(`${api}?ref=${BRANCH}`,{headers});
+  if(cur.status===401||cur.status===403)throw new Error('トークンが無効です');
+  const sha=cur.ok?(await cur.json()).sha:undefined;
+  const b64=await new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>res(fr.result.split(',')[1]);
+    fr.onerror=rej;fr.readAsDataURL(blob);
+  });
+  const put=await fetch(api,{method:'PUT',headers,body:JSON.stringify({
+    message:`画像更新: ${path}`,content:b64,branch:BRANCH,...(sha?{sha}:{})
+  })});
+  if(!put.ok)throw new Error(`保存失敗 (${put.status})`);
+}
+</script>
+</body>
+</html>
